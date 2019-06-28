@@ -1,27 +1,15 @@
 package main
 
 import (
+	"github.com/cranki/url-shortener/server/cmd/start"
 	"github.com/jessevdk/go-flags"
 
 	"fmt"
 	"os"
 )
 
-type GreetCommand struct {
-	Message string `long:"message"`
-}
-
-func (cmd *GreetCommand) Execute(args []string) error {
-	fmt.Println(cmd.Message)
-	return nil
-}
-
-type MainCommand struct {
-	Greet GreetCommand `command:"greet" description:"Send polite greeting message"`
-}
-
 func main() {
-	var mainCmd MainCommand
+	var mainCmd start.MainCommand
 
 	parser := flags.NewParser(&mainCmd, flags.HelpFlag|flags.PassDoubleDash)
 	parser.NamespaceDelimiter = "-"

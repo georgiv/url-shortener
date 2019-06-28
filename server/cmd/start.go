@@ -4,11 +4,15 @@ import (
 	"fmt"
 )
 
-type StartCommand struct {
-	host string
-	port int
+type GreetCommand struct {
+	Message string `long:"message"`
 }
 
-func (*StartCommand) Execute(args []string) {
-	fmt.Println("Hello, Go World! :)")
+func (cmd *GreetCommand) Execute(args []string) error {
+	fmt.Println(cmd.Message)
+	return nil
+}
+
+type MainCommand struct {
+	Greet GreetCommand `command:"greet" description:"Send polite greeting message"`
 }
