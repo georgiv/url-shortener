@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/cranki/url-shortener/server/cmd/start"
+	"github.com/georgiv/url-shortener/server/cmd"
 	"github.com/jessevdk/go-flags"
 
 	"fmt"
@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	var mainCmd start.MainCommand
+	var mainCmd cmd.MainCommand
 
 	parser := flags.NewParser(&mainCmd, flags.HelpFlag|flags.PassDoubleDash)
 	parser.NamespaceDelimiter = "-"
