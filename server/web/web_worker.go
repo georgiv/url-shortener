@@ -64,7 +64,20 @@ func (s *urlServer) Shutdown() {
 }
 
 func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Get URL %v", mux.Vars(r)["id"])
+	id := mux.Vars(r)["id"]
+	url, err := s.dbWorker.Find("id_to_url", id)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Panicf("Error while retrieving data for key %v", id)
+	}
+
+	if url != "" {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, url)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, fmt.Sprintf("Key %v does not exist", id))
+	}
 }
 
 func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
