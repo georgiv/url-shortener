@@ -14,7 +14,7 @@ import (
 
 type DbWorker interface {
 	Find(stmtID string, param string) (string, error)
-	Persist() error
+	Persist(id string, url string) error
 	Shutdown()
 }
 
@@ -96,7 +96,29 @@ func (dbWorker *db) Find(stmtID string, param string) (string, error) {
 	return res, nil
 }
 
-func (dbWorker *db) Persist() error {
+func (dbWorker *db) Persist(id string, url string) error {
+	tx, err := dbWorker.con.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("insert into url(id, original_url, creation_time, expiration_time) values(?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(id, url)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -112,10 +134,6 @@ func (dbWorker *db) Shutdown() {
 	log.Println("DB pool successfully shut down")
 }
 
-func (dbWorker *db) GetURL(id string) {
-
-}
-
 func (dbWorker *db) prepareStmt(query string) (*sql.Stmt, error) {
 	stmt, err := dbWorker.con.Prepare(query)
 	if err != nil {
@@ -126,14 +144,6 @@ func (dbWorker *db) prepareStmt(query string) (*sql.Stmt, error) {
 }
 
 func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, error) {
-	// var res string
-	// err := stmt.QueryRow(param).Scan(&res)
-	// if err != nil {
-	// 	return "", err
-	// }
-
-	// return res, nil
-
 	var res string
 	rows, err := stmt.Query(param)
 	if err != nil {

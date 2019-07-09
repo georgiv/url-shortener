@@ -27,8 +27,8 @@ type urlServer struct {
 }
 
 type urlAlias struct {
+	Key      string `json:"key"`
 	Original string `json:"original"`
-	Custom   string `json:"custom"`
 }
 
 func NewServer(host string, port int) (WebWorker, error) {
@@ -68,7 +68,7 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 	url, err := s.dbWorker.Find("id_to_url", id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while retrieving data for key %v", id)
+		log.Panicf("Error while retrieving data for key %v: %v", id, err)
 	}
 
 	if url != "" {
@@ -83,14 +83,52 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		panic(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Panicf("Error while reading data: %v", err)
 	}
 
 	var b urlAlias
-	json.Unmarshal(body, &b)
-	fmt.Println(b)
-	//w.Header().Set("Location", "http://localost:8888/dummy")
-	fmt.Fprintf(w, "Add URL")
+	err = json.Unmarshal(body, &b)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, fmt.Sprintf("Bad JSON format: %v", err))
+		log.Panicf("Bad JSON format: %v", err)
+	}
+
+	url, err := s.dbWorker.Find("id_to_url", b.Key)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Panicf("Error while retrieving data for key %v: %v", b.Key, err)
+	}
+
+	if url != "" {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprintf(w, "Key %v already registered for url %v", b.Key, url)
+		return
+	}
+
+	id, err := s.dbWorker.Find("url_to_id", b.Original)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Panicf("Error while retrieving data for url %v: %v", b.Original, err)
+	}
+
+	if id != "" {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprintf(w, "Url %v already registered under key %v", b.Original, id)
+		return
+	}
+
+	err = s.dbWorker.Persist(b.Key, b.Original)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Panicf("Error while creating mapping %v ---> %v: %v", b.Key, b.Original, err)
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintf(w, fmt.Sprintf("Key %v registered for url %v", b.Key, b.Original))
+
+	fmt.Fprintf(w, fmt.Sprintf("Creating mapping %v ---> %v", b.Key, b.Original))
 }
 
 func (s *urlServer) stopListener() {
