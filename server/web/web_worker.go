@@ -31,8 +31,8 @@ type urlAlias struct {
 	Original string `json:"original"`
 }
 
-func NewServer(host string, port int) (WebWorker, error) {
-	dbWorker, err := db.NewDbWorker()
+func NewServer(host string, port int, expiration int) (WebWorker, error) {
+	dbWorker, err := db.NewDbWorker(expiration)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,8 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 	url, err := s.dbWorker.Find("id_to_url", id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while retrieving data for key %v: %v", id, err)
+		log.Printf("Error while retrieving data for key %v: %v", id, err)
+		return
 	}
 
 	if url != "" {
@@ -84,7 +85,8 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while reading data: %v", err)
+		log.Printf("Error while reading data: %v", err)
+		return
 	}
 
 	var b urlAlias
@@ -92,13 +94,15 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, fmt.Sprintf("Bad JSON format: %v", err))
-		log.Panicf("Bad JSON format: %v", err)
+		log.Printf("Bad JSON format: %v", err)
+		return
 	}
 
 	url, err := s.dbWorker.Find("id_to_url", b.Key)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while retrieving data for key %v: %v", b.Key, err)
+		log.Printf("Error while retrieving data for key %v: %v", b.Key, err)
+		return
 	}
 
 	if url != "" {
@@ -110,7 +114,8 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	id, err := s.dbWorker.Find("url_to_id", b.Original)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while retrieving data for url %v: %v", b.Original, err)
+		log.Printf("Error while retrieving data for url %v: %v", b.Original, err)
+		return
 	}
 
 	if id != "" {
@@ -119,16 +124,15 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.dbWorker.Persist(b.Key, b.Original)
+	err = s.dbWorker.Register(b.Key, b.Original)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Panicf("Error while creating mapping %v ---> %v: %v", b.Key, b.Original, err)
+		log.Printf("Error while registering key %v for url %v: %v", b.Key, b.Original, err)
+		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(w, fmt.Sprintf("Key %v registered for url %v", b.Key, b.Original))
-
-	fmt.Fprintf(w, fmt.Sprintf("Creating mapping %v ---> %v", b.Key, b.Original))
 }
 
 func (s *urlServer) stopListener() {

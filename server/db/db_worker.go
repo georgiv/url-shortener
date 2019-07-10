@@ -14,13 +14,14 @@ import (
 
 type DbWorker interface {
 	Find(stmtID string, param string) (string, error)
-	Persist(id string, url string) error
+	Register(id string, url string) error
 	Shutdown()
 }
 
 type db struct {
 	con        *sql.DB
 	statements map[string]*sql.Stmt
+	expiration int
 }
 
 type DbConfig struct {
@@ -33,7 +34,7 @@ type DbConfig struct {
 	MaxIdleCons int    `json:"max_idle_cons"`
 }
 
-func NewDbWorker() (DbWorker, error) {
+func NewDbWorker(expiration int) (DbWorker, error) {
 	f, err := os.Open("res/db_config.json")
 	if err != nil {
 		return nil, err
@@ -47,7 +48,10 @@ func NewDbWorker() (DbWorker, error) {
 	}
 
 	var dbConfig DbConfig
-	json.Unmarshal(b, &dbConfig)
+	err = json.Unmarshal(b, &dbConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	con, err := sql.Open("mysql", fmt.Sprintf("%v:%v@tcp(%v:%v)/%v", dbConfig.User, dbConfig.Password, dbConfig.Host, dbConfig.Port, dbConfig.DbName))
 	if err != nil {
@@ -63,17 +67,19 @@ func NewDbWorker() (DbWorker, error) {
 		return nil, err
 	}
 
-	dbWorker := &db{con: con}
+	expirationSec := expiration * 24 * 60 * 60
+
+	dbWorker := &db{con: con, expiration: expirationSec}
 
 	dbWorker.statements = make(map[string]*sql.Stmt)
 
-	urlByIDStmt, err := dbWorker.prepareStmt("select original_url from url where id like ?")
+	urlByIDStmt, err := dbWorker.prepareStmt("SELECT original_url FROM url WHERE id LIKE ?")
 	if err != nil {
 		return nil, err
 	}
 	dbWorker.statements["id_to_url"] = urlByIDStmt
 
-	idByURLstmt, err := dbWorker.prepareStmt("select id from url where original_url like ?")
+	idByURLstmt, err := dbWorker.prepareStmt("SELECT id FROM url WHERE original_url LIKE ?")
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +102,14 @@ func (dbWorker *db) Find(stmtID string, param string) (string, error) {
 	return res, nil
 }
 
-func (dbWorker *db) Persist(id string, url string) error {
+func (dbWorker *db) Register(id string, url string) error {
 	tx, err := dbWorker.con.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("insert into url(id, original_url, creation_time, expiration_time) values(?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())")
+	stmt, err := tx.Prepare(fmt.Sprintf("INSERT INTO url(id, original_url, creation_time, expiration_time) VALUES(?, ?, UNIX_TIMESTAMP(), UNIX_TIMESTAMP() + %v)", dbWorker.expiration))
 	if err != nil {
 		return err
 	}
@@ -125,9 +131,16 @@ func (dbWorker *db) Persist(id string, url string) error {
 func (dbWorker *db) Shutdown() {
 	log.Println("Shutting down DB pool...")
 
+	for k, v := range dbWorker.statements {
+		err := v.Close()
+		if err != nil {
+			log.Printf("Closing %v statement failed: %v", k, err)
+		}
+	}
+
 	err := dbWorker.con.Close()
 	if err != nil {
-		log.Println(fmt.Sprintf("Shutting down DB pool failed: %v", err))
+		log.Printf("Shutting down DB pool failed: %v", err)
 		return
 	}
 

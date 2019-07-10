@@ -1,11 +1,11 @@
 package main
 
 import (
+	"log"
+	"os"
+
 	"github.com/georgiv/url-shortener/server/cmd"
 	"github.com/jessevdk/go-flags"
-
-	"fmt"
-	"os"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 
 	_, err := parser.Parse()
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		os.Exit(1)
 	}
 }
