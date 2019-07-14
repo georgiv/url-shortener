@@ -1,6 +1,8 @@
 package web
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -97,6 +99,12 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Bad JSON format: %v", err)
 		return
 	}
+
+	hasher := md5.New()
+	hasher.Write([]byte(b.Original))
+	hashed := hex.EncodeToString(hasher.Sum(nil))
+
+	fmt.Printf("TEST>>>>> %v <<<<<TEST", hashed)
 
 	url, err := s.dbWorker.Find("id_to_url", b.Key)
 	if err != nil {
