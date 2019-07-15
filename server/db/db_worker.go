@@ -13,15 +13,16 @@ import (
 )
 
 type DbWorker interface {
-	Find(stmtID string, param string) (string, error)
+	Find(stmtID string, param string) (string, string, error)
 	Register(id string, url string) error
 	Shutdown()
 }
 
 type db struct {
-	con        *sql.DB
-	statements map[string]*sql.Stmt
-	expiration int
+	con           *sql.DB
+	statements    map[string]*sql.Stmt
+	expiration    int
+	cleanerHandle chan struct{}
 }
 
 type DbConfig struct {
@@ -73,33 +74,68 @@ func NewDbWorker(expiration int) (DbWorker, error) {
 
 	dbWorker.statements = make(map[string]*sql.Stmt)
 
-	urlByIDStmt, err := dbWorker.prepareStmt("SELECT original_url FROM url WHERE id LIKE ?")
+	urlByIDStmt, err := dbWorker.prepareStmt("SELECT id, original_url, expiration_time FROM url WHERE id LIKE ?")
 	if err != nil {
 		return nil, err
 	}
 	dbWorker.statements["id_to_url"] = urlByIDStmt
 
-	idByURLstmt, err := dbWorker.prepareStmt("SELECT id FROM url WHERE original_url LIKE ?")
+	idByURLstmt, err := dbWorker.prepareStmt("SELECT id, original_url, expiration_time FROM url WHERE original_url LIKE ?")
 	if err != nil {
 		return nil, err
 	}
 	dbWorker.statements["url_to_id"] = idByURLstmt
 
+	cleaner := time.NewTicker(10 * time.Second)
+	cleanerHandle := make(chan struct{})
+
+	dbWorker.cleanerHandle = cleanerHandle
+
+	go func() {
+		for {
+			select {
+			case <-cleaner.C:
+				log.Println("Running scheduled cleaner for expired entries...")
+				dbWorker.clean()
+				log.Println("Scheduled cleaner for expired entries completed")
+			case <-cleanerHandle:
+				log.Println("Closing cleaner for expired entries...")
+				cleaner.Stop()
+				log.Println("Cleaner for expired entries successfully closed")
+				return
+			}
+		}
+	}()
+
 	return dbWorker, nil
 }
 
-func (dbWorker *db) Find(stmtID string, param string) (string, error) {
+func (dbWorker *db) Find(stmtID string, param string) (string, string, error) {
 	stmt, ok := dbWorker.statements[stmtID]
 	if !ok {
-		return "", nil
+		return "", "", nil
 	}
 
-	res, err := dbWorker.query(stmt, param)
+	id, url, expirationTime, err := dbWorker.query(stmt, param)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	return res, nil
+	if expirationTime != 0 {
+		now := int(time.Now().Unix())
+		if now >= expirationTime {
+			log.Printf("Deleting expired entry {%v: %v}...", id, url)
+			err := dbWorker.unregister(id)
+			if err == nil {
+				log.Printf("Expired entry {%v: %v} successfully deleted", id, url)
+				return "", "", nil
+			} else {
+				log.Printf("Deleting expired entry {%v: %v} failed: %v", id, url, err)
+			}
+		}
+	}
+
+	return id, url, nil
 }
 
 func (dbWorker *db) Register(id string, url string) error {
@@ -131,6 +167,8 @@ func (dbWorker *db) Register(id string, url string) error {
 func (dbWorker *db) Shutdown() {
 	log.Println("Shutting down DB pool...")
 
+	close(dbWorker.cleanerHandle)
+
 	for k, v := range dbWorker.statements {
 		err := v.Close()
 		if err != nil {
@@ -156,25 +194,58 @@ func (dbWorker *db) prepareStmt(query string) (*sql.Stmt, error) {
 	return stmt, nil
 }
 
-func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, error) {
-	var res string
+func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, string, int, error) {
+	var (
+		id             string
+		URL            string
+		expirationTime int
+	)
 	rows, err := stmt.Query(param)
 	if err != nil {
-		return "", err
+		return "", "", 0, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rows.Scan(&res)
+		err = rows.Scan(&id, &URL, &expirationTime)
 		if err != nil {
-			return "", err
+			return "", "", 0, err
 		}
 	}
 
 	err = rows.Err()
 	if err != nil {
-		return "", err
+		return "", "", 0, err
 	}
 
-	return res, nil
+	return id, URL, expirationTime, nil
+}
+
+func (dbWorker *db) unregister(id string) error {
+	tx, err := dbWorker.con.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("DELETE FROM url WHERE id LIKE ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(id)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dbWorker *db) clean() {
 }

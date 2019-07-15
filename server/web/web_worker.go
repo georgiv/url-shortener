@@ -29,7 +29,7 @@ type urlServer struct {
 }
 
 type urlPayload struct {
-	Key   string `json:"key"`
+	ID    string `json:"id"`
 	URL   string `json:"url"`
 	Error string `json:"error"`
 }
@@ -69,10 +69,10 @@ func (s *urlServer) Shutdown() {
 
 func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	url, err := s.dbWorker.Find("id_to_url", id)
+	_, url, err := s.dbWorker.Find("id_to_url", id)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while retrieving data for key %v: %v", id, err)
+		log.Printf("Error while retrieving data for id %v: %v", id, err)
 		return
 	}
 
@@ -80,12 +80,12 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("location", url)
 		w.WriteHeader(http.StatusPermanentRedirect)
 	} else {
-		keyErr := urlPayload{
-			Key:   id,
-			Error: fmt.Sprintf("Key %v does not exists", id),
+		idErr := urlPayload{
+			ID:    id,
+			Error: fmt.Sprintf("ID %v does not exists", id),
 		}
 
-		keyErrJSON, err := json.Marshal(keyErr)
+		idErrJSON, err := json.Marshal(idErr)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("Bad JSON format: %v", err)
@@ -94,7 +94,7 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write(keyErrJSON)
+		w.Write(idErrJSON)
 	}
 }
 
@@ -120,28 +120,28 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if b.Key == "" {
+	if b.ID == "" {
 		hasher := md5.New()
 		hasher.Write([]byte(b.URL))
 		hashed := hex.EncodeToString(hasher.Sum(nil))
-		b.Key = hashed[len(hashed)-6:]
+		b.ID = hashed[len(hashed)-6:]
 	}
 
-	url, err := s.dbWorker.Find("id_to_url", b.Key)
+	_, url, err := s.dbWorker.Find("id_to_url", b.ID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while retrieving data for key %v: %v", b.Key, err)
+		log.Printf("Error while retrieving data for id %v: %v", b.ID, err)
 		return
 	}
 
 	if url != "" {
-		keyErr := urlPayload{
-			Key:   b.Key,
+		idErr := urlPayload{
+			ID:    b.ID,
 			URL:   url,
-			Error: fmt.Sprintf("Key %v already registered for url %v", b.Key, url),
+			Error: fmt.Sprintf("ID %v already registered for url %v", b.ID, url),
 		}
 
-		keyErrJSON, err := json.Marshal(keyErr)
+		idErrJSON, err := json.Marshal(idErr)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("Bad JSON format: %v", err)
@@ -150,11 +150,11 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		w.Write(keyErrJSON)
+		w.Write(idErrJSON)
 		return
 	}
 
-	id, err := s.dbWorker.Find("url_to_id", b.URL)
+	id, _, err := s.dbWorker.Find("url_to_id", b.URL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("Error while retrieving data for url %v: %v", b.URL, err)
@@ -162,13 +162,13 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if id != "" {
-		keyErr := urlPayload{
-			Key:   id,
+		idErr := urlPayload{
+			ID:    id,
 			URL:   b.URL,
-			Error: fmt.Sprintf("Url %v already registered under key %v", b.URL, id),
+			Error: fmt.Sprintf("Url %v already registered under id %v", b.URL, id),
 		}
 
-		keyErrJSON, err := json.Marshal(keyErr)
+		idErrJSON, err := json.Marshal(idErr)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Printf("Bad JSON format: %v", err)
@@ -177,18 +177,18 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		w.Write(keyErrJSON)
+		w.Write(idErrJSON)
 		return
 	}
 
-	err = s.dbWorker.Register(b.Key, b.URL)
+	err = s.dbWorker.Register(b.ID, b.URL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while registering key %v for url %v: %v", b.Key, b.URL, err)
+		log.Printf("Error while registering id %v for url %v: %v", b.ID, b.URL, err)
 		return
 	}
 
-	w.Header().Set("location", fmt.Sprintf("http://%v:%v/%v", s.host, s.port, b.Key))
+	w.Header().Set("location", fmt.Sprintf("http://%v:%v/%v", s.host, s.port, b.ID))
 	w.WriteHeader(http.StatusCreated)
 }
 
