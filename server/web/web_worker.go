@@ -28,9 +28,10 @@ type urlServer struct {
 	webWorker http.Server
 }
 
-type urlAlias struct {
-	Key      string `json:"key"`
-	Original string `json:"original"`
+type urlPayload struct {
+	Key   string `json:"key"`
+	URL   string `json:"url"`
+	Error string `json:"error"`
 }
 
 func NewServer(host string, port int, expiration int) (WebWorker, error) {
@@ -45,6 +46,7 @@ func NewServer(host string, port int, expiration int) (WebWorker, error) {
 func (s *urlServer) Handle() {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/urls/{id}", s.getURL).Methods("GET")
+	r.HandleFunc("/{id}", s.redirect).Methods("GET")
 	r.HandleFunc("/api/urls", s.addURL).Methods("POST")
 	s.webWorker = http.Server{Addr: fmt.Sprintf("%v:%v", s.host, s.port), Handler: r}
 
@@ -75,12 +77,30 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if url != "" {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, url)
+		w.Header().Set("location", url)
+		w.WriteHeader(http.StatusPermanentRedirect)
 	} else {
+		keyErr := urlPayload{
+			Key:   id,
+			Error: fmt.Sprintf("Key %v does not exists", id),
+		}
+
+		keyErrJSON, err := json.Marshal(keyErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, fmt.Sprintf("Key %v does not exist", id))
+		w.Write(keyErrJSON)
 	}
+}
+
+func (s *urlServer) redirect(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	http.Redirect(w, r, fmt.Sprintf("http://%v:%v/api/urls/%v", s.host, s.port, id), http.StatusPermanentRedirect)
 }
 
 func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +111,7 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var b urlAlias
+	var b urlPayload
 	err = json.Unmarshal(body, &b)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -100,11 +120,12 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hasher := md5.New()
-	hasher.Write([]byte(b.Original))
-	hashed := hex.EncodeToString(hasher.Sum(nil))
-
-	fmt.Printf("TEST>>>>> %v <<<<<TEST", hashed)
+	if b.Key == "" {
+		hasher := md5.New()
+		hasher.Write([]byte(b.URL))
+		hashed := hex.EncodeToString(hasher.Sum(nil))
+		b.Key = hashed[len(hashed)-6:]
+	}
 
 	url, err := s.dbWorker.Find("id_to_url", b.Key)
 	if err != nil {
@@ -114,33 +135,61 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if url != "" {
+		keyErr := urlPayload{
+			Key:   b.Key,
+			URL:   url,
+			Error: fmt.Sprintf("Key %v already registered for url %v", b.Key, url),
+		}
+
+		keyErrJSON, err := json.Marshal(keyErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintf(w, "Key %v already registered for url %v", b.Key, url)
+		w.Write(keyErrJSON)
 		return
 	}
 
-	id, err := s.dbWorker.Find("url_to_id", b.Original)
+	id, err := s.dbWorker.Find("url_to_id", b.URL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while retrieving data for url %v: %v", b.Original, err)
+		log.Printf("Error while retrieving data for url %v: %v", b.URL, err)
 		return
 	}
 
 	if id != "" {
+		keyErr := urlPayload{
+			Key:   id,
+			URL:   b.URL,
+			Error: fmt.Sprintf("Url %v already registered under key %v", b.URL, id),
+		}
+
+		keyErrJSON, err := json.Marshal(keyErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintf(w, "Url %v already registered under key %v", b.Original, id)
+		w.Write(keyErrJSON)
 		return
 	}
 
-	err = s.dbWorker.Register(b.Key, b.Original)
+	err = s.dbWorker.Register(b.Key, b.URL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while registering key %v for url %v: %v", b.Key, b.Original, err)
+		log.Printf("Error while registering key %v for url %v: %v", b.Key, b.URL, err)
 		return
 	}
 
+	w.Header().Set("location", fmt.Sprintf("http://%v:%v/%v", s.host, s.port, b.Key))
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, fmt.Sprintf("Key %v registered for url %v", b.Key, b.Original))
 }
 
 func (s *urlServer) stopListener() {
