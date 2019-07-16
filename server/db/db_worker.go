@@ -86,7 +86,8 @@ func NewDbWorker(expiration int) (DbWorker, error) {
 	}
 	dbWorker.statements["url_to_id"] = idByURLstmt
 
-	cleaner := time.NewTicker(10 * time.Second)
+	cleaner := time.NewTicker(time.Duration(expirationSec) * time.Second)
+	// cleaner = time.NewTicker(5 * time.Second)
 	cleanerHandle := make(chan struct{})
 
 	dbWorker.cleanerHandle = cleanerHandle
@@ -197,7 +198,7 @@ func (dbWorker *db) prepareStmt(query string) (*sql.Stmt, error) {
 func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, string, int, error) {
 	var (
 		id             string
-		URL            string
+		url            string
 		expirationTime int
 	)
 	rows, err := stmt.Query(param)
@@ -207,7 +208,7 @@ func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, string, int, er
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rows.Scan(&id, &URL, &expirationTime)
+		err = rows.Scan(&id, &url, &expirationTime)
 		if err != nil {
 			return "", "", 0, err
 		}
@@ -218,7 +219,7 @@ func (dbWorker *db) query(stmt *sql.Stmt, param string) (string, string, int, er
 		return "", "", 0, err
 	}
 
-	return id, URL, expirationTime, nil
+	return id, url, expirationTime, nil
 }
 
 func (dbWorker *db) unregister(id string) error {
@@ -248,4 +249,47 @@ func (dbWorker *db) unregister(id string) error {
 }
 
 func (dbWorker *db) clean() {
+	var (
+		id             string
+		url            string
+		expirationTime int
+	)
+
+	stmt, err := dbWorker.prepareStmt("SELECT id, original_url, expiration_time FROM url")
+	if err != nil {
+		log.Printf("Error while running cleaner for expired entries: %v", err)
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Printf("Error while running cleaner for expired entries: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		err = rows.Scan(&id, &url, &expirationTime)
+		if err != nil {
+			log.Printf("Error while running cleaner for expired entries: %v", err)
+			return
+		}
+
+		now := int(time.Now().Unix())
+		if now >= expirationTime {
+			log.Printf("Deleting expired entry {%v: %v}...", id, url)
+			err := dbWorker.unregister(id)
+			if err != nil {
+				log.Printf("Error while running cleaner for expired entries: %v", err)
+				return
+			}
+		}
+	}
+
+	err = rows.Err()
+	if err != nil {
+		log.Printf("Error while running cleaner for expired entries: %v", err)
+		return
+	}
 }
