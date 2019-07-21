@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,8 +47,11 @@ func NewServer(host string, port int, expiration int) (WebWorker, error) {
 func (s *urlServer) Handle() {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/urls/{id}", s.getURL).Methods("GET")
-	r.HandleFunc("/{id}", s.redirect).Methods("GET")
+	r.HandleFunc("/api/urls/{id}", s.handlePreflight).Methods("OPTIONS")
+	// r.HandleFunc("/{id}", s.redirect).Methods("GET")
+	// r.HandleFunc("/{id}", s.handlePreflight).Methods("OPTIONS")
 	r.HandleFunc("/api/urls", s.addURL).Methods("POST")
+	r.HandleFunc("/api/urls", s.handlePreflight).Methods("OPTIONS")
 	s.webWorker = http.Server{Addr: fmt.Sprintf("%v:%v", s.host, s.port), Handler: r}
 
 	go s.stopListener()
@@ -67,7 +71,16 @@ func (s *urlServer) Shutdown() {
 	log.Println("Web server successfully shut down")
 }
 
+func (s *urlServer) handlePreflight(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
 	id := mux.Vars(r)["id"]
 	_, url, err := s.dbWorker.Find("id_to_url", id)
 	if err != nil {
@@ -98,12 +111,16 @@ func (s *urlServer) getURL(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *urlServer) redirect(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-	http.Redirect(w, r, fmt.Sprintf("http://%v:%v/api/urls/%v", s.host, s.port, id), http.StatusPermanentRedirect)
-}
+// func (s *urlServer) redirect(w http.ResponseWriter, r *http.Request) {
+// 	id := mux.Vars(r)["id"]
+// 	http.Redirect(w, r, fmt.Sprintf("http://%v:%v/api/urls/%v", s.host, s.port, id), http.StatusPermanentRedirect)
+// }
 
 func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	w.Header().Set("Access-Control-Expose-Headers", "Location")
+
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -114,9 +131,56 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 	var b urlPayload
 	err = json.Unmarshal(body, &b)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, fmt.Sprintf("Bad JSON format: %v", err))
+		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("Bad JSON format: %v", err)
+		return
+	}
+
+	_, err = url.ParseRequestURI(b.URL)
+	if err != nil {
+		urlErr := urlPayload{
+			ID:    b.ID,
+			URL:   "",
+			Error: fmt.Sprintf("Invalid url: %v", b.URL),
+		}
+
+		urlErrJSON, err := json.Marshal(urlErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(urlErrJSON)
+		return
+	}
+
+	id, _, err := s.dbWorker.Find("url_to_id", b.URL)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("Error while retrieving data for url %v: %v", b.URL, err)
+		return
+	}
+
+	if id != "" {
+		idErr := urlPayload{
+			ID:    id,
+			URL:   b.URL,
+			Error: fmt.Sprintf("Url %v already registered under id %v", b.URL, id),
+		}
+
+		idErrJSON, err := json.Marshal(idErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		w.Write(idErrJSON)
 		return
 	}
 
@@ -154,33 +218,6 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, _, err := s.dbWorker.Find("url_to_id", b.URL)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Printf("Error while retrieving data for url %v: %v", b.URL, err)
-		return
-	}
-
-	if id != "" {
-		idErr := urlPayload{
-			ID:    id,
-			URL:   b.URL,
-			Error: fmt.Sprintf("Url %v already registered under id %v", b.URL, id),
-		}
-
-		idErrJSON, err := json.Marshal(idErr)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Printf("Bad JSON format: %v", err)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		w.Write(idErrJSON)
-		return
-	}
-
 	err = s.dbWorker.Register(b.ID, b.URL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -188,7 +225,7 @@ func (s *urlServer) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("location", fmt.Sprintf("http://%v:%v/%v", s.host, s.port, b.ID))
+	w.Header().Set("location", fmt.Sprintf("/%v", b.ID))
 	w.WriteHeader(http.StatusCreated)
 }
 
