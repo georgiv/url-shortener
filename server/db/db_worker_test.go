@@ -5,7 +5,17 @@ import (
 	"testing"
 )
 
-func TestNewWorkerValid(t *testing.T) {
+func TestNewWorker(t *testing.T) {
+	original, _ := os.Getwd()
+	t.Logf("CWD: %v", original)
+
+	os.Chdir("../../testing")
 	dir, _ := os.Getwd()
+	t.Logf("CWD: %v", dir)
+
+	// db, err := db.NewWorker(0)
+
+	os.Chdir(original)
+	dir, _ = os.Getwd()
 	t.Logf("CWD: %v", dir)
 }

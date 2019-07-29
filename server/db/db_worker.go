@@ -54,6 +54,10 @@ type Worker interface {
 
 // NewWorker creates and returns instance satisfying the Worker
 // interface
+// Params:
+//   - expiration: integer representing the period in days for
+//     running cleanup service which removes the entries which
+//     expired
 func NewWorker(expiration int) (worker Worker, err error) {
 	f, err := os.Open("res/db_config.json")
 	if err != nil {

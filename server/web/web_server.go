@@ -55,6 +55,12 @@ type Server interface {
 
 // NewServer creates and returns instance satisfying the Server
 // interface
+// Params:
+//   - host: binding host for the URL shortener service
+//   - port: listening port for the URL shortener service
+//   - expiration: integer representing the period in days for
+//     running cleanup service which removes the entries which
+//     expired
 func NewServer(host string, port int, expiration int) (server Server, err error) {
 	dbWorker, err := db.NewWorker(expiration)
 	if err != nil {
