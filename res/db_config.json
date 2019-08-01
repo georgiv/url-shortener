@@ -1,5 +1,5 @@
 {
-    "host": "localhost",
+    "host": "url-shortener-db",
     "port": 3306,
     "user": "cranki",
     "password": "abcd1234",

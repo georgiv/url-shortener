@@ -91,9 +91,19 @@ func NewWorker(expiration int) (worker Worker, err error) {
 	con.SetMaxIdleConns(config.MaxOpenCons)
 	con.SetConnMaxLifetime(time.Hour)
 
-	err = con.Ping()
-	if err != nil {
-		return
+	retry := 2
+	for {
+		err = con.Ping()
+		if err == nil {
+			break
+		}
+		if err != nil && retry == 0 {
+			return
+		}
+
+		retry--
+
+		time.Sleep(30 * time.Second)
 	}
 
 	expirationSec := expiration * 24 * 60 * 60

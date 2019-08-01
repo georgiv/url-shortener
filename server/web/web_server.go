@@ -94,6 +94,8 @@ func (server *web) Handle() {
 
 	go server.stopListener()
 
+	log.Println(fmt.Sprintf("Server accepts requests on port %v", server.port))
+
 	err := server.webWorker.ListenAndServe()
 	if err != nil {
 		log.Println(fmt.Sprintf("Error while processing requests: %v", err))

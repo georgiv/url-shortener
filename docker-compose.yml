@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+  worker:
+    image: cranki/url-shortener:dev
+    ports:
+      - 8888:8888
+    depends_on:
+      - url-shortener-db
+  url-shortener-db:
+    image: cranki/url-shortener-mysql:1.0
