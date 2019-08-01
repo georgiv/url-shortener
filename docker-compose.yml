@@ -3,9 +3,19 @@ version: "3"
 services:
   worker:
     image: cranki/url-shortener:dev
+    container_name: worker
     ports:
       - 8888:8888
     depends_on:
       - url-shortener-db
+    networks:
+      - cranki
   url-shortener-db:
     image: cranki/url-shortener-mysql:1.0
+    container_name: url-shortener-db
+    networks:
+      - cranki
+
+networks:
+  cranki:
+    driver: "bridge"
