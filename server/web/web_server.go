@@ -214,7 +214,7 @@ func (server *web) addURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, s := range b.ID {
-		if !(unicode.IsLetter(s) || (s >= 0 && s <= 9) || s == '_' || s == '-') {
+		if !(unicode.IsLetter(s) || (s >= '0' && s <= '9') || s == '_' || s == '-') {
 			urlErr := payload{
 				ID:    b.ID,
 				URL:   b.URL,
