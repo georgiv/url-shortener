@@ -193,7 +193,7 @@ func (server *web) addURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(b.ID) != 6 {
+	if len(b.ID) != 0 && len(b.ID) != 6 {
 		urlErr := payload{
 			ID:    b.ID,
 			URL:   b.URL,
