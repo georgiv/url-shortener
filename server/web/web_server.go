@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"unicode"
 
 	"github.com/georgiv/url-shortener/server/db"
 	"github.com/gorilla/mux"
@@ -190,6 +191,48 @@ func (server *web) addURL(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write(urlErrJSON)
 		return
+	}
+
+	if len(b.ID) != 6 {
+		urlErr := payload{
+			ID:    b.ID,
+			URL:   b.URL,
+			Error: fmt.Sprintf("Invalid ID length: %v is %v character long. It should be exactly 6 characters long", b.ID, len(b.ID)),
+		}
+
+		urlErrJSON, err := json.Marshal(urlErr)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Bad JSON format: %v", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(urlErrJSON)
+		return
+	}
+
+	for _, s := range b.ID {
+		if !(unicode.IsLetter(s) || (s >= 0 && s <= 9) || s == '_' || s == '-') {
+			urlErr := payload{
+				ID:    b.ID,
+				URL:   b.URL,
+				Error: fmt.Sprintf("ID contains forbidden characters: %v. Allowed characters: alphanumeric characters, underscore and dash", b.ID),
+			}
+
+			urlErrJSON, err := json.Marshal(urlErr)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				log.Printf("Bad JSON format: %v", err)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write(urlErrJSON)
+			return
+		}
 	}
 
 	id, _, err := server.dbWorker.Find("url_to_id", b.URL)
