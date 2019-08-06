@@ -1,0 +1,9 @@
+{
+    "host": "localhost",
+    "port": 3306,
+    "user": "dummyuser",
+    "password": "abcd1234",
+    "db_name": "url_shortener_test",
+    "max_open_cons": 10,
+    "max_idle_cons": 5
+}

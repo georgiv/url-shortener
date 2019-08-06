@@ -6,6 +6,7 @@
 package web
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -16,7 +17,9 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/georgiv/url-shortener/server/db"
@@ -61,8 +64,18 @@ type Server interface {
 //   - port: listening port for the URL shortener service
 //   - expiration: integer representing the period in days for
 //     running cleanup service which removes the entries which
-//     expired
+//     expired. It should be positive integer, in case negative
+//     or 0 value is passed, it will be substituted with the
+//     default value (7)
 func NewServer(host string, port int, expiration int) (server Server, err error) {
+	if procs := runtime.GOMAXPROCS(0); procs < 4 {
+		runtime.GOMAXPROCS(4)
+	}
+
+	if expiration <= 0 {
+		expiration = 7
+	}
+
 	dbWorker, err := db.NewWorker(expiration)
 	if err != nil {
 		return
@@ -73,10 +86,11 @@ func NewServer(host string, port int, expiration int) (server Server, err error)
 }
 
 type web struct {
-	host      string
-	port      int
-	dbWorker  db.Worker
-	webWorker http.Server
+	host           string
+	port           int
+	dbWorker       db.Worker
+	webWorker      http.Server
+	isShuttingDown bool
 }
 
 type payload struct {
@@ -105,9 +119,20 @@ func (server *web) Handle() {
 }
 
 func (server *web) Shutdown() {
+	if server.isShuttingDown {
+		return
+	}
+
+	server.isShuttingDown = true
+
 	log.Println("Shutting down web server...")
 
 	server.dbWorker.Shutdown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	server.webWorker.Shutdown(ctx)
 
 	log.Println("Web server successfully shut down")
 }
